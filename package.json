@@ -1,0 +1,16 @@
+{
+  "name": "westernbid-localisation-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "translate:wpml": "tsx scripts/translate-wpml.ts"
+  },
+  "dependencies": {
+    "openai": "^4.104.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.3"
+  }
+}
