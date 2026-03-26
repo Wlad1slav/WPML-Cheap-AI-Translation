@@ -9,6 +9,9 @@ type CliOptions = {
   outDir: string;
   file: string | null;
   targetLanguage: string | null;
+  priceInputPer1M: number | null;
+  priceCachedInputPer1M: number | null;
+  priceOutputPer1M: number | null;
   model: string;
   concurrency: number;
   overwrite: boolean;
@@ -22,6 +25,141 @@ type TransUnit = {
   translatable: boolean;
 };
 
+type UsageTotals = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+};
+
+type TranslationResponse = {
+  text: string;
+  usage: UsageTotals;
+};
+
+type TranslationBatchResult = {
+  translations: Map<string, string>;
+  usage: UsageTotals;
+};
+
+type ModelPricing = {
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
+};
+
+type CostBreakdown = {
+  inputCost: number;
+  cachedInputCost: number;
+  outputCost: number;
+  totalCost: number;
+};
+
+// Pricing source: https://platform.openai.com/pricing (checked 2026-03-26).
+const MODEL_PRICING_USD_PER_1M: Record<string, ModelPricing> = {
+  "gpt-4.1": { inputPer1M: 2.0, cachedInputPer1M: 0.5, outputPer1M: 8.0 },
+  "gpt-4.1-mini": { inputPer1M: 0.4, cachedInputPer1M: 0.1, outputPer1M: 1.6 },
+  "gpt-4.1-nano": { inputPer1M: 0.1, cachedInputPer1M: 0.025, outputPer1M: 0.4 },
+  "gpt-4o": { inputPer1M: 2.5, cachedInputPer1M: 1.25, outputPer1M: 10.0 },
+  "gpt-4o-mini": { inputPer1M: 0.15, cachedInputPer1M: 0.075, outputPer1M: 0.6 },
+  "gpt-5": { inputPer1M: 1.25, cachedInputPer1M: 0.125, outputPer1M: 10.0 },
+  "gpt-5-mini": { inputPer1M: 0.25, cachedInputPer1M: 0.025, outputPer1M: 2.0 },
+  "gpt-5-nano": { inputPer1M: 0.05, cachedInputPer1M: 0.005, outputPer1M: 0.4 },
+};
+
+const DEFAULT_MODEL = "gpt-4.1-nano";
+
+function isLikelyModelId(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("gpt-") || normalized.startsWith("o1") || normalized.startsWith("o3");
+}
+
+function zeroUsageTotals(): UsageTotals {
+  return {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function addUsage(target: UsageTotals, delta: UsageTotals): void {
+  target.inputTokens += delta.inputTokens;
+  target.cachedInputTokens += delta.cachedInputTokens;
+  target.outputTokens += delta.outputTokens;
+  target.reasoningTokens += delta.reasoningTokens;
+  target.totalTokens += delta.totalTokens;
+}
+
+function extractUsageTotals(rawUsage: unknown): UsageTotals {
+  const usage = rawUsage as {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    input_tokens_details?: { cached_tokens?: number };
+    output_tokens_details?: { reasoning_tokens?: number };
+  };
+
+  return {
+    inputTokens: usage?.input_tokens ?? 0,
+    cachedInputTokens: usage?.input_tokens_details?.cached_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    reasoningTokens: usage?.output_tokens_details?.reasoning_tokens ?? 0,
+    totalTokens: usage?.total_tokens ?? 0,
+  };
+}
+
+function resolveModelPricing(model: string): ModelPricing | null {
+  if (MODEL_PRICING_USD_PER_1M[model]) {
+    return MODEL_PRICING_USD_PER_1M[model];
+  }
+
+  const entries = Object.entries(MODEL_PRICING_USD_PER_1M).sort(
+    ([a], [b]) => b.length - a.length,
+  );
+  for (const [key, price] of entries) {
+    if (model.startsWith(`${key}-`)) {
+      return price;
+    }
+  }
+
+  return null;
+}
+
+function resolveEffectivePricing(options: CliOptions): ModelPricing | null {
+  const preset = resolveModelPricing(options.model);
+  const inputPer1M = options.priceInputPer1M ?? preset?.inputPer1M;
+  const outputPer1M = options.priceOutputPer1M ?? preset?.outputPer1M;
+
+  if (inputPer1M === undefined || outputPer1M === undefined) {
+    return null;
+  }
+
+  const cachedInputPer1M =
+    options.priceCachedInputPer1M ?? preset?.cachedInputPer1M ?? inputPer1M;
+
+  return { inputPer1M, cachedInputPer1M, outputPer1M };
+}
+
+function calculateCost(usage: UsageTotals, pricing: ModelPricing): CostBreakdown {
+  const safeCached = Math.max(0, Math.min(usage.cachedInputTokens, usage.inputTokens));
+  const nonCachedInput = Math.max(0, usage.inputTokens - safeCached);
+
+  const inputCost = (nonCachedInput / 1_000_000) * pricing.inputPer1M;
+  const cachedInputCost = (safeCached / 1_000_000) * pricing.cachedInputPer1M;
+  const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputPer1M;
+  const totalCost = inputCost + cachedInputCost + outputCost;
+
+  return { inputCost, cachedInputCost, outputCost, totalCost };
+}
+
+function formatUsd(value: number): string {
+  const digits = value >= 0.01 ? 4 : 6;
+  return `$${value.toFixed(digits)}`;
+}
+
 function printHelp(): void {
   console.log(`WPML XLIFF translator
 
@@ -29,11 +167,15 @@ Usage:
   npm run translate:wpml -- --file "Western Bid-translation-job-264.xliff"
   npm run translate:wpml -- "Western Bid-translation-job-264.xliff"
   npm run translate:wpml -- "Western Bid-translation-job-264.xliff" "de"
+  npm run translate:wpml -- "Western Bid-translation-job-264.xliff" "gpt-5-nano"
 
 Options:
   --file <name|path>      XLIFF file name from posts directory or explicit path
   --target-language <lc>  Target language override (example: en, de, fr)
   --to <lc>               Alias for --target-language
+  --price-input <usd>     Input price per 1M tokens (USD)
+  --price-cached <usd>    Cached input price per 1M tokens (USD)
+  --price-output <usd>    Output price per 1M tokens (USD)
   --posts-dir <path>      Source directory with XLIFF files (default: posts)
   --out-dir <path>        Output directory for import-ready files (default: wpml-import)
   --model <model>         OpenAI model (default: gpt-4.1-nano)
@@ -49,7 +191,10 @@ function parseCliArgs(argv: string[]): CliOptions {
     outDir: "wpml-import",
     file: null,
     targetLanguage: null,
-    model: "gpt-4.1-nano",
+    priceInputPer1M: null,
+    priceCachedInputPer1M: null,
+    priceOutputPer1M: null,
+    model: DEFAULT_MODEL,
     concurrency: 3,
     overwrite: false,
   };
@@ -76,6 +221,14 @@ function parseCliArgs(argv: string[]): CliOptions {
       return value;
     };
 
+    const readNumber = (flag: string): number => {
+      const value = Number(readValue(flag));
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`${flag} must be a non-negative number`);
+      }
+      return value;
+    };
+
     switch (arg) {
       case "--file":
         options.file = readValue("--file");
@@ -83,6 +236,15 @@ function parseCliArgs(argv: string[]): CliOptions {
       case "--target-language":
       case "--to":
         options.targetLanguage = readValue(arg);
+        break;
+      case "--price-input":
+        options.priceInputPer1M = readNumber("--price-input");
+        break;
+      case "--price-cached":
+        options.priceCachedInputPer1M = readNumber("--price-cached");
+        break;
+      case "--price-output":
+        options.priceOutputPer1M = readNumber("--price-output");
         break;
       case "--posts-dir":
         options.postsDir = readValue("--posts-dir");
@@ -106,11 +268,21 @@ function parseCliArgs(argv: string[]): CliOptions {
           throw new Error(`Unknown argument: ${arg}`);
         }
         if (options.file) {
-          if (options.targetLanguage) {
-            throw new Error(`Unexpected positional argument: ${arg}`);
+          if (!options.targetLanguage) {
+            if (isLikelyModelId(arg) && options.model === DEFAULT_MODEL) {
+              options.model = arg;
+              break;
+            }
+            options.targetLanguage = arg;
+            break;
           }
-          options.targetLanguage = arg;
-          break;
+
+          if (isLikelyModelId(arg) && options.model === DEFAULT_MODEL) {
+            options.model = arg;
+            break;
+          }
+
+          throw new Error(`Unexpected positional argument: ${arg}`);
         }
         options.file = arg;
     }
@@ -302,7 +474,7 @@ async function translateText(
   sourceLanguage: string,
   targetLanguage: string,
   text: string,
-): Promise<string> {
+): Promise<TranslationResponse> {
   const response = await client.responses.create({
     model,
     input: [
@@ -315,7 +487,7 @@ async function translateText(
         content: text,
       },
     ],
-    temperature: 0,
+    // temperature: 0,
   });
 
   const output = (response.output_text ?? "").trim();
@@ -323,7 +495,10 @@ async function translateText(
     throw new Error("Model returned an empty translation");
   }
 
-  return output;
+  return {
+    text: output,
+    usage: extractUsageTotals(response.usage),
+  };
 }
 
 async function translateWithRetry(
@@ -332,7 +507,7 @@ async function translateWithRetry(
   sourceLanguage: string,
   targetLanguage: string,
   text: string,
-): Promise<string> {
+): Promise<TranslationResponse> {
   const maxAttempts = 3;
   let lastError: unknown;
 
@@ -358,10 +533,11 @@ async function translateUniqueTexts(
   targetLanguage: string,
   uniqueTexts: string[],
   concurrency: number,
-): Promise<Map<string, string>> {
+): Promise<TranslationBatchResult> {
   const results = new Map<string, string>();
+  const usageTotals = zeroUsageTotals();
   if (uniqueTexts.length === 0) {
-    return results;
+    return { translations: results, usage: usageTotals };
   }
 
   let done = 0;
@@ -386,7 +562,8 @@ async function translateUniqueTexts(
         targetLanguage,
         sourceText,
       );
-      results.set(sourceText, translated);
+      results.set(sourceText, translated.text);
+      addUsage(usageTotals, translated.usage);
 
       done += 1;
       console.log(`[${done}/${uniqueTexts.length}] translated`);
@@ -394,7 +571,7 @@ async function translateUniqueTexts(
   });
 
   await Promise.all(workers);
-  return results;
+  return { translations: results, usage: usageTotals };
 }
 
 function buildOutputXml(originalXml: string, units: TransUnit[], translatedMap: Map<string, string>): string {
@@ -484,7 +661,7 @@ async function main(): Promise<void> {
   );
 
   const client = new OpenAI({ apiKey });
-  const translatedMap = await translateUniqueTexts(
+  const translationBatch = await translateUniqueTexts(
     client,
     options.model,
     sourceLanguage,
@@ -493,7 +670,7 @@ async function main(): Promise<void> {
     options.concurrency,
   );
 
-  const translatedXml = buildOutputXml(xml, units, translatedMap);
+  const translatedXml = buildOutputXml(xml, units, translationBatch.translations);
   const outputXml = replaceFileTargetLanguage(translatedXml, targetLanguage);
 
   const outputDir = path.resolve(options.outDir);
@@ -522,6 +699,32 @@ async function main(): Promise<void> {
   console.log(`Model:  ${options.model}`);
   console.log(`Units:  ${units.length} (${uniqueTexts.length} unique translated segments)`);
   console.log(`Langs:  ${sourceLanguage} -> ${targetLanguage}`);
+
+  const usage = translationBatch.usage;
+  console.log("Tokens:");
+  console.log(
+    `  input=${usage.inputTokens.toLocaleString()} (cached=${usage.cachedInputTokens.toLocaleString()})`,
+  );
+  console.log(`  output=${usage.outputTokens.toLocaleString()}`);
+  console.log(`  total=${usage.totalTokens.toLocaleString()}`);
+
+  const pricing = resolveEffectivePricing(options);
+  if (!pricing) {
+    console.log(
+      "Cost: unavailable (model pricing not found; use --price-input and --price-output to set custom rates).",
+    );
+  } else {
+    const cost = calculateCost(usage, pricing);
+    console.log("Cost (estimated, USD):");
+    console.log(`  input:        ${formatUsd(cost.inputCost)}`);
+    console.log(`  cached input: ${formatUsd(cost.cachedInputCost)}`);
+    console.log(`  output:       ${formatUsd(cost.outputCost)}`);
+    console.log(`  total:        ${formatUsd(cost.totalCost)}`);
+    console.log(
+      `  rates per 1M: input=$${pricing.inputPer1M}, cached=$${pricing.cachedInputPer1M}, output=$${pricing.outputPer1M}`,
+    );
+    console.log("  source: https://platform.openai.com/pricing (checked 2026-03-26)");
+  }
 }
 
 main().catch((error: unknown) => {
