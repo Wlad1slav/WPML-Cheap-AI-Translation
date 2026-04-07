@@ -87,6 +87,23 @@ Useful options:
 
 This command runs `translate:wpml` for each file sequentially and prints a batch summary.
 
+## Archive Translations To ZIP
+
+Archive translated files (from `wpml-import`) into ZIP:
+
+```bash
+npm run zip:translations
+```
+
+Useful options:
+
+- `--source-dir wpml-import`
+- `--out-dir archives`
+- `--name de-translations.zip`
+- `--overwrite`
+
+By default the script creates ZIP in `archives` with a timestamped file name.
+
 ## Token and Cost Stats
 
 After translation, the script prints:
