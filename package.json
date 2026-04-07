@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "translate:wpml": "tsx scripts/translate-wpml.ts"
+    "translate:wpml": "tsx scripts/translate-wpml.ts",
+    "translate:all": "tsx scripts/translate-all-posts.ts",
   },
   "dependencies": {
     "openai": "^4.104.0"

@@ -65,6 +65,28 @@ Output file name format:
 
 `<original-name>.<target-language>.wpml-import.xliff`
 
+## Translate All Files From `posts`
+
+Translate every `.xliff` file from `posts`:
+
+```bash
+npm run translate:all -- --target-language de
+```
+
+Useful options:
+
+- `--posts-dir posts`
+- `--out-dir wpml-import`
+- `--target-language de` (alias: `--to de`)
+- `--model gpt-4.1-nano`
+- `--concurrency 3`
+- `--overwrite`
+- `--start-from "Western Bid-translation-job-264.xliff"` (resume from a specific file)
+- `--limit 10` (translate only first N files after filtering)
+- `--continue-on-error`
+
+This command runs `translate:wpml` for each file sequentially and prints a batch summary.
+
 ## Token and Cost Stats
 
 After translation, the script prints:
