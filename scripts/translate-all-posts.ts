@@ -12,6 +12,7 @@ type CliOptions = {
   priceInputPer1M: number | null;
   priceCachedInputPer1M: number | null;
   priceOutputPer1M: number | null;
+  preservePageArticleHandle: boolean;
   overwrite: boolean;
   continueOnError: boolean;
   limit: number | null;
@@ -36,6 +37,10 @@ Options:
   --price-input <usd>       Input price per 1M tokens (USD)
   --price-cached <usd>      Cached input price per 1M tokens (USD)
   --price-output <usd>      Output price per 1M tokens (USD)
+  --preserve-page-article-handle
+                            Keep original handle/slug for page/article files (default)
+  --translate-page-article-handle
+                            Disable handle/slug preservation for page/article files
   --start-from <filename>   Start from this file name (inclusive)
   --limit <number>          Translate only the first N files after filtering
   --overwrite               Overwrite output files if they already exist
@@ -54,6 +59,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     priceInputPer1M: null,
     priceCachedInputPer1M: null,
     priceOutputPer1M: null,
+    preservePageArticleHandle: true,
     overwrite: false,
     continueOnError: false,
     limit: null,
@@ -75,6 +81,16 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg === "--continue-on-error") {
       options.continueOnError = true;
+      continue;
+    }
+
+    if (arg === "--preserve-page-article-handle") {
+      options.preservePageArticleHandle = true;
+      continue;
+    }
+
+    if (arg === "--translate-page-article-handle") {
+      options.preservePageArticleHandle = false;
       continue;
     }
 
@@ -219,6 +235,9 @@ function buildTranslateArgs(
   }
   if (options.overwrite) {
     args.push("--overwrite");
+  }
+  if (!options.preservePageArticleHandle) {
+    args.push("--translate-page-article-handle");
   }
 
   return args;

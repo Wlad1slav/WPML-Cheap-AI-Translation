@@ -59,6 +59,8 @@ Optional flags:
 - `--price-input 0.10` (USD per 1M input tokens)
 - `--price-cached 0.025` (USD per 1M cached input tokens)
 - `--price-output 0.40` (USD per 1M output tokens)
+- `--preserve-page-article-handle` (default, keep original handle/slug for `post_page` and `post_post`)
+- `--translate-page-article-handle` (disable handle/slug preservation for `post_page` and `post_post`)
 - `--overwrite`
 
 Output file name format:
@@ -80,6 +82,8 @@ Useful options:
 - `--target-language de` (alias: `--to de`)
 - `--model gpt-4.1-nano`
 - `--concurrency 3`
+- `--preserve-page-article-handle` (default)
+- `--translate-page-article-handle`
 - `--overwrite`
 - `--start-from "Western Bid-translation-job-264.xliff"` (resume from a specific file)
 - `--limit 10` (translate only first N files after filtering)

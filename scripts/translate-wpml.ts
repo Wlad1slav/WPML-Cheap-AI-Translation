@@ -14,6 +14,7 @@ type CliOptions = {
   priceOutputPer1M: number | null;
   model: string;
   concurrency: number;
+  preservePageArticleHandle: boolean;
   overwrite: boolean;
 };
 
@@ -23,6 +24,12 @@ type TransUnit = {
   block: string;
   sourceText: string;
   translatable: boolean;
+  copySourceToTarget: boolean;
+};
+
+type FileContext = {
+  postTypes: string[];
+  isPageOrArticle: boolean;
 };
 
 type UsageTotals = {
@@ -69,6 +76,8 @@ const MODEL_PRICING_USD_PER_1M: Record<string, ModelPricing> = {
 };
 
 const DEFAULT_MODEL = "gpt-4.1-nano";
+const HANDLE_FIELD_REGEX = /\b(handle|slug|post[_-]?name|url[_-]?slug|permalink)\b/i;
+const PAGE_OR_ARTICLE_POST_TYPES = new Set(["post_page", "post_post", "page", "article", "post_article"]);
 
 function isLikelyModelId(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -180,6 +189,10 @@ Options:
   --out-dir <path>        Output directory for import-ready files (default: wpml-import)
   --model <model>         OpenAI model (default: gpt-4.1-nano)
   --concurrency <number>  Parallel translation requests (default: 3)
+  --preserve-page-article-handle
+                          Keep original handle/slug for page/article files (default)
+  --translate-page-article-handle
+                          Disable handle/slug preservation for page/article files
   --overwrite             Overwrite output file if it already exists
   --help                  Show this help
 `);
@@ -196,6 +209,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     priceOutputPer1M: null,
     model: DEFAULT_MODEL,
     concurrency: 3,
+    preservePageArticleHandle: true,
     overwrite: false,
   };
 
@@ -209,6 +223,16 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg === "--overwrite") {
       options.overwrite = true;
+      continue;
+    }
+
+    if (arg === "--preserve-page-article-handle") {
+      options.preservePageArticleHandle = true;
+      continue;
+    }
+
+    if (arg === "--translate-page-article-handle") {
+      options.preservePageArticleHandle = false;
       continue;
     }
 
@@ -429,7 +453,73 @@ function toCdata(value: string): string {
   return `<![CDATA[${safe}]]>`;
 }
 
-function extractTransUnits(xml: string): TransUnit[] {
+function normalizeForHandleMatch(value: string | null): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function isHandleField(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+  return HANDLE_FIELD_REGEX.test(normalizeForHandleMatch(value));
+}
+
+function extractPostTypes(xml: string): string[] {
+  const postTypes = new Set<string>();
+  const regex =
+    /<phase\b[^>]*\bphase-name\s*=\s*(?:"post_type"|'post_type')[^>]*>[\s\S]*?<note>([\s\S]*?)<\/note>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(xml)) !== null) {
+    const raw = xmlInnerToText(match[1]).trim().toLowerCase();
+    if (raw) {
+      postTypes.add(raw);
+    }
+  }
+
+  return Array.from(postTypes);
+}
+
+function isPageOrArticlePostType(postType: string): boolean {
+  if (PAGE_OR_ARTICLE_POST_TYPES.has(postType)) {
+    return true;
+  }
+
+  return postType.includes("page") || postType.includes("article");
+}
+
+function isPageOrArticleFile(postTypes: string[]): boolean {
+  return postTypes.some((postType) => isPageOrArticlePostType(postType));
+}
+
+function shouldPreserveOriginalHandle(
+  options: CliOptions,
+  fileContext: FileContext,
+  block: string,
+): boolean {
+  if (!options.preservePageArticleHandle || !fileContext.isPageOrArticle) {
+    return false;
+  }
+
+  const transUnitTagMatch = block.match(/<trans-unit\b([^>]*)>/i);
+  const transUnitAttrs = transUnitTagMatch?.[1] ?? "";
+  const id = extractAttr(transUnitAttrs, "id");
+  const resname = extractAttr(transUnitAttrs, "resname");
+
+  const extradataTagMatch = block.match(/<tool:extradata\b([^>]*)\/?>/i);
+  const extradataAttrs = extradataTagMatch?.[1] ?? "";
+  const extraUnit = extractAttr(extradataAttrs, "unit");
+  const extraPurpose = extractAttr(extradataAttrs, "purpose");
+
+  return (
+    isHandleField(id) ||
+    isHandleField(resname) ||
+    isHandleField(extraUnit) ||
+    isHandleField(extraPurpose)
+  );
+}
+
+function extractTransUnits(xml: string, options: CliOptions, fileContext: FileContext): TransUnit[] {
   const units: TransUnit[] = [];
   const transUnitRegex = /<trans-unit\b[\s\S]*?<\/trans-unit>/gi;
   let match: RegExpExecArray | null;
@@ -442,13 +532,15 @@ function extractTransUnits(xml: string): TransUnit[] {
     }
 
     const sourceText = xmlInnerToText(sourceMatch[1]);
-    const translatable = sourceText.trim().length > 0;
+    const copySourceToTarget = shouldPreserveOriginalHandle(options, fileContext, block);
+    const translatable = sourceText.trim().length > 0 && !copySourceToTarget;
     units.push({
       start: match.index,
       end: match.index + block.length,
       block,
       sourceText,
       translatable,
+      copySourceToTarget,
     });
   }
 
@@ -600,6 +692,19 @@ function buildOutputXml(originalXml: string, units: TransUnit[], translatedMap: 
           `</source><target>${targetInner}</target>`,
         );
       }
+    } else if (unit.copySourceToTarget) {
+      const targetInner = toCdata(unit.sourceText);
+      if (/<target\b[^>]*>[\s\S]*?<\/target>/i.test(updatedBlock)) {
+        updatedBlock = updatedBlock.replace(
+          /<target\b([^>]*)>[\s\S]*?<\/target>/i,
+          (_m, targetAttrs: string) => `<target${targetAttrs}>${targetInner}</target>`,
+        );
+      } else {
+        updatedBlock = updatedBlock.replace(
+          /<\/source>/i,
+          `</source><target>${targetInner}</target>`,
+        );
+      }
     }
 
     outputXml += updatedBlock;
@@ -646,7 +751,13 @@ async function main(): Promise<void> {
     throw new Error("Target language cannot be empty");
   }
 
-  const units = extractTransUnits(xml);
+  const postTypes = extractPostTypes(xml);
+  const fileContext: FileContext = {
+    postTypes,
+    isPageOrArticle: isPageOrArticleFile(postTypes),
+  };
+  const units = extractTransUnits(xml, options, fileContext);
+  const preservedHandleCount = units.filter((unit) => unit.copySourceToTarget).length;
 
   if (units.length === 0) {
     throw new Error("No trans-unit entries found in XLIFF");
@@ -699,6 +810,11 @@ async function main(): Promise<void> {
   console.log(`Model:  ${options.model}`);
   console.log(`Units:  ${units.length} (${uniqueTexts.length} unique translated segments)`);
   console.log(`Langs:  ${sourceLanguage} -> ${targetLanguage}`);
+  if (options.preservePageArticleHandle && fileContext.isPageOrArticle) {
+    const postTypeLabel = fileContext.postTypes.length > 0 ? fileContext.postTypes.join(", ") : "unknown";
+    console.log(`Post type: ${postTypeLabel}`);
+    console.log(`Handle/slug units preserved: ${preservedHandleCount}`);
+  }
 
   const usage = translationBatch.usage;
   console.log("Tokens:");
