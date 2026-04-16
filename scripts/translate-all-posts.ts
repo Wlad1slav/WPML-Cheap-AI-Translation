@@ -38,7 +38,8 @@ Options:
   --price-cached <usd>      Cached input price per 1M tokens (USD)
   --price-output <usd>      Output price per 1M tokens (USD)
   --preserve-page-article-handle
-                            Keep original handle/slug for page/article files (default)
+                            Preserve original handle/slug for page/article files when XLIFF exposes it;
+                            otherwise rely on WPML Page URL="Copy from original language" (default)
   --translate-page-article-handle
                             Disable handle/slug preservation for page/article files
   --start-from <filename>   Start from this file name (inclusive)

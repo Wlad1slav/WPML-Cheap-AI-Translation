@@ -190,7 +190,8 @@ Options:
   --model <model>         OpenAI model (default: gpt-4.1-nano)
   --concurrency <number>  Parallel translation requests (default: 3)
   --preserve-page-article-handle
-                          Keep original handle/slug for page/article files (default)
+                          Preserve original handle/slug for page/article files when XLIFF exposes it;
+                          otherwise rely on WPML Page URL="Copy from original language" (default)
   --translate-page-article-handle
                           Disable handle/slug preservation for page/article files
   --overwrite             Overwrite output file if it already exists
@@ -457,11 +458,41 @@ function normalizeForHandleMatch(value: string | null): string {
   return (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
 }
 
+function isExactNormalizedValue(value: string | null, expected: string): boolean {
+  return normalizeForHandleMatch(value) === expected;
+}
+
 function isHandleField(value: string | null): boolean {
   if (!value) {
     return false;
   }
   return HANDLE_FIELD_REGEX.test(normalizeForHandleMatch(value));
+}
+
+function looksLikeHandleValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/\s/.test(trimmed) || /[<>]/.test(trimmed)) {
+    return false;
+  }
+
+  if (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../")
+  ) {
+    return false;
+  }
+
+  if (trimmed.includes("?") || trimmed.includes("#")) {
+    return false;
+  }
+
+  return true;
 }
 
 function extractPostTypes(xml: string): string[] {
@@ -480,6 +511,35 @@ function extractPostTypes(xml: string): string[] {
   return Array.from(postTypes);
 }
 
+function extractExternalFileHref(xml: string): string | null {
+  const match = xml.match(/<external-file\b([^>]*)\/?>/i);
+  if (!match) {
+    return null;
+  }
+
+  return extractAttr(match[1], "href");
+}
+
+function extractUrlSlug(url: string | null): string | null {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    return segments.at(-1) ?? null;
+  } catch {
+    const trimmed = url.trim().replace(/[?#].*$/, "").replace(/\/+$/, "");
+    if (!trimmed) {
+      return null;
+    }
+
+    const slashIndex = trimmed.lastIndexOf("/");
+    return slashIndex >= 0 ? trimmed.slice(slashIndex + 1) : trimmed;
+  }
+}
+
 function isPageOrArticlePostType(postType: string): boolean {
   if (PAGE_OR_ARTICLE_POST_TYPES.has(postType)) {
     return true;
@@ -496,6 +556,7 @@ function shouldPreserveOriginalHandle(
   options: CliOptions,
   fileContext: FileContext,
   block: string,
+  sourceText: string,
 ): boolean {
   if (!options.preservePageArticleHandle || !fileContext.isPageOrArticle) {
     return false;
@@ -510,13 +571,51 @@ function shouldPreserveOriginalHandle(
   const extradataAttrs = extradataTagMatch?.[1] ?? "";
   const extraUnit = extractAttr(extradataAttrs, "unit");
   const extraPurpose = extractAttr(extradataAttrs, "purpose");
+  const extraGroup = extractAttr(extradataAttrs, "group");
 
-  return (
+  if (
     isHandleField(id) ||
     isHandleField(resname) ||
     isHandleField(extraUnit) ||
     isHandleField(extraPurpose)
-  );
+  ) {
+    return true;
+  }
+
+  const isGenericUrlField =
+    isExactNormalizedValue(id, "url") ||
+    isExactNormalizedValue(resname, "url") ||
+    isExactNormalizedValue(extraUnit, "url");
+
+  if (!isGenericUrlField) {
+    return false;
+  }
+
+  const isMediaGroup = normalizeForHandleMatch(extraGroup).includes("/media");
+  if (isMediaGroup) {
+    return false;
+  }
+
+  return looksLikeHandleValue(sourceText);
+}
+
+function buildMissingHandlePreservationWarning(referenceUrl: string | null): string {
+  const sourceHandle = extractUrlSlug(referenceUrl);
+  const referenceDetails = sourceHandle
+    ? `Original handle from XLIFF header reference: "${sourceHandle}".`
+    : referenceUrl
+      ? `Original reference URL: ${referenceUrl}.`
+      : "";
+
+  return [
+    "This page/article XLIFF does not contain a dedicated slug/handle trans-unit, so the script cannot write the original handle into the translated file directly.",
+    "The <reference><external-file> URL is treated as metadata, not as a writable slug field.",
+    'To keep the original slug on import, set WPML -> Settings -> Translated documents options -> Page URL to "Copy from original language".',
+    'If you want slug control inside XLIFF itself, set Page URL to "Translate" before exporting the translation job so WPML includes a dedicated slug field.',
+    referenceDetails,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function extractTransUnits(xml: string, options: CliOptions, fileContext: FileContext): TransUnit[] {
@@ -532,7 +631,7 @@ function extractTransUnits(xml: string, options: CliOptions, fileContext: FileCo
     }
 
     const sourceText = xmlInnerToText(sourceMatch[1]);
-    const copySourceToTarget = shouldPreserveOriginalHandle(options, fileContext, block);
+    const copySourceToTarget = shouldPreserveOriginalHandle(options, fileContext, block, sourceText);
     const translatable = sourceText.trim().length > 0 && !copySourceToTarget;
     units.push({
       start: match.index,
@@ -756,8 +855,17 @@ async function main(): Promise<void> {
     postTypes,
     isPageOrArticle: isPageOrArticleFile(postTypes),
   };
+  const referenceUrl = extractExternalFileHref(xml);
   const units = extractTransUnits(xml, options, fileContext);
   const preservedHandleCount = units.filter((unit) => unit.copySourceToTarget).length;
+  const missingHandlePreservationWarning =
+    options.preservePageArticleHandle && fileContext.isPageOrArticle && preservedHandleCount === 0
+      ? buildMissingHandlePreservationWarning(referenceUrl)
+      : null;
+
+  if (missingHandlePreservationWarning) {
+    console.warn(`Warning: ${missingHandlePreservationWarning}`);
+  }
 
   if (units.length === 0) {
     throw new Error("No trans-unit entries found in XLIFF");
@@ -814,6 +922,9 @@ async function main(): Promise<void> {
     const postTypeLabel = fileContext.postTypes.length > 0 ? fileContext.postTypes.join(", ") : "unknown";
     console.log(`Post type: ${postTypeLabel}`);
     console.log(`Handle/slug units preserved: ${preservedHandleCount}`);
+    if (missingHandlePreservationWarning) {
+      console.log('Handle/slug preservation fallback: relies on WPML Page URL="Copy from original language".');
+    }
   }
 
   const usage = translationBatch.usage;

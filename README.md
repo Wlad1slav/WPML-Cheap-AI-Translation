@@ -59,7 +59,7 @@ Optional flags:
 - `--price-input 0.10` (USD per 1M input tokens)
 - `--price-cached 0.025` (USD per 1M cached input tokens)
 - `--price-output 0.40` (USD per 1M output tokens)
-- `--preserve-page-article-handle` (default, keep original handle/slug for `post_page` and `post_post`)
+- `--preserve-page-article-handle` (default, preserve original handle/slug for `post_page` and `post_post` when XLIFF exposes it; otherwise rely on WPML `Page URL = Copy from original language`)
 - `--translate-page-article-handle` (disable handle/slug preservation for `post_page` and `post_post`)
 - `--overwrite`
 
@@ -82,7 +82,7 @@ Useful options:
 - `--target-language de` (alias: `--to de`)
 - `--model gpt-4.1-nano`
 - `--concurrency 3`
-- `--preserve-page-article-handle` (default)
+- `--preserve-page-article-handle` (default, same caveat about WPML `Page URL`)
 - `--translate-page-article-handle`
 - `--overwrite`
 - `--start-from "Western Bid-translation-job-264.xliff"` (resume from a specific file)
@@ -90,6 +90,19 @@ Useful options:
 - `--continue-on-error`
 
 This command runs `translate:wpml` for each file sequentially and prints a batch summary.
+
+## Handle Preservation Caveat
+
+For page/article jobs, WPML can omit a dedicated slug field from exported XLIFF files. In that case this tool cannot physically write the original handle into the translated XLIFF on its own.
+
+If your translated import must keep the original slug, set:
+
+`WPML -> Settings -> Translated documents options -> Page URL -> Copy from original language`
+
+If you want the slug to appear as a separate field in translation/XLIFF, set `Page URL` to `Translate` before exporting the job.
+
+Official WPML docs:
+https://wpml.org/documentation/getting-started-guide/translating-page-slugs/
 
 ## Archive Translations To ZIP
 
