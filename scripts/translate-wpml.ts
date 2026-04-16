@@ -517,10 +517,11 @@ function makeTranslatorPrompt(sourceLanguage: string, targetLanguage: string): s
     `Translate from ${sourceLanguage} to ${targetLanguage}.`,
     "Rules:",
     "1. Return only the translated text with no explanations or markdown.",
-    "2. Keep HTML tags, shortcodes, placeholders, URLs, JSON keys, numbers, and code syntax unchanged.",
-    "3. Translate only human-readable natural language content.",
-    "4. Preserve line breaks and spacing as naturally as possible.",
-    "5. If a fragment is already in the target language, keep it unchanged.",
+    "2. Keep HTML tags, shortcode brackets/structures, placeholders, URLs, JSON keys, numbers, and code syntax unchanged.",
+    "3. IMPORTANT: You MUST translate human-readable natural language text embedded within code, HTML tags, shortcodes, or attributes (e.g., link text like 'Детальніше', button values, or 'title'/'alt' attributes).",
+    "4. STRICTLY EXCLUDE: Do NOT translate any programming comments (e.g., // comments, /* comments */, ), function names, or variable names.",
+    "5. Preserve line breaks, spacing, and original file structure exactly as they appear.",
+    "6. If a fragment is already in the target language, keep it unchanged."
   ].join("\n");
 }
 
@@ -531,7 +532,6 @@ async function translateText(
   targetLanguage: string,
   text: string,
 ): Promise<TranslationResponse> {
-  console.log(text);
   
   const response = await client.responses.create({
     model,
