@@ -108,6 +108,35 @@ Useful options:
 
 By default the script creates ZIP in `archives` with a timestamped file name.
 
+## Split Files Into Multiple ZIP Parts
+
+Create several standalone ZIP archives instead of one large file.
+Recommended on PowerShell/npm:
+
+```bash
+npm run zip:split -- 25MB wpml-import archives de-translations
+```
+
+Flag-based form also works:
+
+```bash
+npm run zip:split -- --max-size 25MB
+```
+
+Useful options:
+
+- `--source-dir wpml-import`
+- `--out-dir archives`
+- `--name de-translations`
+- `--max-size 25MB`
+- `--overwrite`
+
+The splitter groups files by their original sizes, then creates multiple ZIP parts such as:
+
+`de-translations-part01-of03.zip`
+
+This is useful when you need smaller upload-ready archives instead of one large ZIP.
+
 ## Token and Cost Stats
 
 After translation, the script prints:
