@@ -4,6 +4,7 @@ import process from "node:process";
 import readline from "node:readline/promises";
 import OpenAI from "openai";
 import { DEFAULT_MODEL, HANDLE_FIELD_REGEX, PAGE_OR_ARTICLE_POST_TYPES } from "./lib/config.js";
+import { appendTranslationLog, TRANSLATION_LOG_PATH } from "./lib/translation-log.js";
 import { CliOptions } from "./lib/types.js";
 import { addUsage, calculateCost, extractUsageTotals, formatUsd, resolveEffectivePricing, UsageTotals, zeroUsageTotals } from "./lib/usage-cost.js";
 import { formatDuration, isLikelyModelId } from "./lib/utils.js";
@@ -806,12 +807,12 @@ async function main(): Promise<void> {
   console.log(`  total=${usage.totalTokens.toLocaleString()}`);
 
   const pricing = resolveEffectivePricing(options);
-  if (!pricing) {
+  const cost = pricing ? calculateCost(usage, pricing) : null;
+  if (!pricing || !cost) {
     console.log(
       "Cost: unavailable (model pricing not found; use --price-input and --price-output to set custom rates).",
     );
   } else {
-    const cost = calculateCost(usage, pricing);
     console.log("Cost (estimated, USD):");
     console.log(`  input:        ${formatUsd(cost.inputCost)}`);
     console.log(`  cached input: ${formatUsd(cost.cachedInputCost)}`);
@@ -822,6 +823,22 @@ async function main(): Promise<void> {
     );
     console.log("  source: https://platform.openai.com/pricing (checked 2026-03-26)");
   }
+
+  await appendTranslationLog({
+    completedAt: new Date().toISOString(),
+    input: absoluteInput,
+    output: outputPath,
+    model: options.model,
+    sourceLanguage,
+    targetLanguage,
+    units: units.length,
+    uniqueTranslatedSegments: uniqueTexts.length,
+    durationMs: Math.round(translationDurationMs),
+    usage,
+    pricingUsdPer1M: pricing,
+    estimatedCostUsd: cost,
+  });
+  console.log(`Log:    ${TRANSLATION_LOG_PATH}`);
 }
 
 main().catch((error: unknown) => {

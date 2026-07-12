@@ -14,7 +14,7 @@ export type UsageTotals = {
   totalTokens: number;
 };
 
-type CostBreakdown = {
+export type CostBreakdown = {
   inputCost: number;
   cachedInputCost: number;
   outputCost: number;

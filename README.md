@@ -6,6 +6,7 @@
 2. Translates `source` content into `target-language` with openai `model`
 3. Writes a separate import-ready XLIFF file for WPML into `wpml-import`
 4. Shows token usage and estimated translation cost in USD
+5. Appends translation time, token usage, and estimated cost to a persistent history log
 
 ## Setup
 
@@ -167,3 +168,9 @@ After translation, the script prints:
 Default rates for known models are based on:
 
 `https://platform.openai.com/pricing` (checked 2026-03-26)
+
+Every successful translation is also appended as one JSON object per line to:
+
+`logs/translation-history.jsonl`
+
+The history file is append-only during normal execution, so subsequent translations do not overwrite earlier entries. Each entry includes the completion date, input and output paths, model, languages, duration, token usage, pricing rates, and estimated cost breakdown.
