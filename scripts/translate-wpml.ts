@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { DEFAULT_MODEL, HANDLE_FIELD_REGEX, PAGE_OR_ARTICLE_POST_TYPES } from "./lib/config.js";
 import { CliOptions } from "./lib/types.js";
 import { addUsage, calculateCost, extractUsageTotals, formatUsd, resolveEffectivePricing, UsageTotals, zeroUsageTotals } from "./lib/usage-cost.js";
-import { isLikelyModelId } from "./lib/utils.js";
+import { formatDuration, isLikelyModelId } from "./lib/utils.js";
 
 type TransUnit = {
   start: number;
@@ -747,6 +747,7 @@ async function main(): Promise<void> {
   );
 
   const client = new OpenAI({ apiKey });
+  const translationStartedAt = performance.now();
   const translationBatch = await translateUniqueTexts(
     client,
     options.model,
@@ -755,6 +756,7 @@ async function main(): Promise<void> {
     uniqueTexts,
     options.concurrency,
   );
+  const translationDurationMs = performance.now() - translationStartedAt;
 
   const translatedXml = buildOutputXml(xml, units, translationBatch.translations);
   const outputXml = replaceFileTargetLanguage(translatedXml, targetLanguage);
@@ -785,6 +787,7 @@ async function main(): Promise<void> {
   console.log(`Model:  ${options.model}`);
   console.log(`Units:  ${units.length} (${uniqueTexts.length} unique translated segments)`);
   console.log(`Langs:  ${sourceLanguage} -> ${targetLanguage}`);
+  console.log(`Translation time: ${formatDuration(translationDurationMs)}`);
   if (options.preservePageArticleHandle && fileContext.isPageOrArticle) {
     const postTypeLabel = fileContext.postTypes.length > 0 ? fileContext.postTypes.join(", ") : "unknown";
     console.log(`Post type: ${postTypeLabel}`);

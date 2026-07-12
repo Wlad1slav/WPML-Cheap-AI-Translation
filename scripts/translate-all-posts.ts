@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
-import { isLikelyModelId } from "./lib/utils.js";
+import { formatDuration, isLikelyModelId } from "./lib/utils.js";
 
 type CliOptions = {
   postsDir: string;
@@ -256,6 +256,7 @@ function buildTranslateArgs(
 }
 
 async function main(): Promise<void> {
+  const batchStartedAt = performance.now();
   const options = parseCliArgs(process.argv.slice(2));
   const postsDirPath = path.resolve(options.postsDir);
   const tsxCliPath = path.resolve("node_modules", "tsx", "dist", "cli.mjs");
@@ -327,6 +328,7 @@ async function main(): Promise<void> {
   console.log(`  succeeded:      ${succeeded}`);
   console.log(`  failed:         ${failed}`);
   console.log(`  skipped:        ${skipped}`);
+  console.log(`  elapsed time:   ${formatDuration(performance.now() - batchStartedAt)}`);
 
   if (failed > 0) {
     process.exitCode = 1;

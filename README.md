@@ -1,4 +1,4 @@
-# WPML Cheap AI Translation
+# WPML AI Translation
 
 ## Features
 
@@ -160,6 +160,7 @@ This is useful when you need smaller upload-ready archives instead of one large 
 
 After translation, the script prints:
 
+- time spent translating
 - input, cached input, output, and total tokens
 - estimated cost in USD per translated file
 
