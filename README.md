@@ -75,6 +75,12 @@ Translate every `.xliff` file from `posts`:
 npm run translate:all -- --target-language de
 ```
 
+If npm swallows `--model`, you can pass model as a positional argument:
+
+```bash
+npm run translate:all -- gpt-5-nano
+```
+
 Useful options:
 
 - `--posts-dir posts`

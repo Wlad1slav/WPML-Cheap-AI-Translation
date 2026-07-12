@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
+import { isLikelyModelId } from "./lib/utils.js";
 
 type CliOptions = {
   postsDir: string;
@@ -26,6 +27,7 @@ Usage:
   npm run translate:all
   npm run translate:all -- --target-language de
   npm run translate:all -- --target-language de --model gpt-5-nano --overwrite
+  npm run translate:all -- gpt-5-nano
 
 Options:
   --posts-dir <path>        Source directory with XLIFF files (default: posts)
@@ -155,6 +157,15 @@ function parseCliArgs(argv: string[]): CliOptions {
         break;
       }
       default:
+        if (!arg.startsWith("--") && isLikelyModelId(arg) && options.model === null) {
+          options.model = arg;
+          break;
+        }
+
+        if (!arg.startsWith("--")) {
+          throw new Error(`Unexpected positional argument: ${arg}`);
+        }
+
         throw new Error(`Unknown argument: ${arg}`);
     }
   }
