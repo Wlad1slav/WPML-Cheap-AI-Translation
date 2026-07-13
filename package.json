@@ -6,7 +6,8 @@
     "translate:wpml": "tsx scripts/translate-wpml.ts",
     "translate:all": "tsx scripts/translate-all-posts.ts",
     "zip:translations": "tsx scripts/zip-translations.ts",
-    "zip:split": "tsx scripts/split-archive.ts"
+    "zip:split": "tsx scripts/split-archive.ts",
+    "zip:split-file": "tsx scripts/split-zip-file.ts"
   },
   "dependencies": {
     "openai": "^4.104.0"

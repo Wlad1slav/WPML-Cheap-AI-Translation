@@ -157,6 +157,29 @@ The splitter groups files by their original sizes, then creates multiple ZIP par
 
 This is useful when you need smaller upload-ready archives instead of one large ZIP.
 
+## Split One Existing ZIP Into Two Parts
+
+If WPML rejects one of the generated archives, split that specific ZIP into two
+smaller standalone archives:
+
+```bash
+npm run zip:split-file -- archives/de-translations-part01-of03.zip
+```
+
+By default, the two new files are created next to the source archive:
+
+`de-translations-part01-of03_1.zip`
+
+`de-translations-part01-of03_2.zip`
+
+The original ZIP is left unchanged. Files are balanced between the new archives
+by their uncompressed sizes. Optional arguments:
+
+- `--out-dir archives/smaller`
+- `--name de-translations-retry`
+- `--parts 3` (create more than two parts)
+- `--overwrite`
+
 ## Token and Cost Stats
 
 After translation, the script prints:
