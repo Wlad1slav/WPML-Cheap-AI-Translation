@@ -5,6 +5,7 @@ import readline from "node:readline/promises";
 import OpenAI from "openai";
 import { DEFAULT_MODEL, HANDLE_FIELD_REGEX, PAGE_OR_ARTICLE_POST_TYPES } from "./lib/config.js";
 import { appendTranslationLog, TRANSLATION_LOG_PATH } from "./lib/translation-log.js";
+import { loadTranslationRules } from "./lib/translation-rules.js";
 import { CliOptions } from "./lib/types.js";
 import { addUsage, calculateCost, extractUsageTotals, formatUsd, resolveEffectivePricing, UsageTotals, zeroUsageTotals } from "./lib/usage-cost.js";
 import { formatDuration, isLikelyModelId } from "./lib/utils.js";
@@ -53,6 +54,7 @@ Options:
   --price-output <usd>    Output price per 1M tokens (USD)
   --posts-dir <path>      Source directory with XLIFF files (default: posts)
   --out-dir <path>        Output directory for import-ready files (default: wpml-import)
+  --rules-file <path>     JSON rules grouped by target language (default: translation-rules.json)
   --model <model>         OpenAI model (default: gpt-4.1-nano)
   --concurrency <number>  Parallel translation requests (default: 3)
   --preserve-page-article-handle
@@ -69,6 +71,7 @@ function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     postsDir: "posts",
     outDir: "wpml-import",
+    rulesFile: "translation-rules.json",
     file: null,
     targetLanguage: null,
     priceInputPer1M: null,
@@ -142,6 +145,9 @@ function parseCliArgs(argv: string[]): CliOptions {
         break;
       case "--out-dir":
         options.outDir = readValue("--out-dir");
+        break;
+      case "--rules-file":
+        options.rulesFile = readValue("--rules-file");
         break;
       case "--model":
         options.model = readValue("--model");
@@ -512,8 +518,12 @@ function extractTransUnits(xml: string, options: CliOptions, fileContext: FileCo
   return units;
 }
 
-function makeTranslatorPrompt(sourceLanguage: string, targetLanguage: string): string {
-  return [
+function makeTranslatorPrompt(
+  sourceLanguage: string,
+  targetLanguage: string,
+  translationRules: string[],
+): string {
+  const prompt = [
     "You are a professional translator for WordPress/WPML content.",
     `Translate from ${sourceLanguage} to ${targetLanguage}.`,
     "Rules:",
@@ -522,8 +532,18 @@ function makeTranslatorPrompt(sourceLanguage: string, targetLanguage: string): s
     "3. IMPORTANT: You MUST translate human-readable natural language text embedded within code, HTML tags, shortcodes, or attributes (e.g., link text like 'Детальніше', button values, or 'title'/'alt' attributes).",
     "4. STRICTLY EXCLUDE: Do NOT translate any programming comments (e.g., // comments, /* comments */, ), function names, or variable names.",
     "5. Preserve line breaks, spacing, and original file structure exactly as they appear.",
-    "6. If a fragment is already in the target language, keep it unchanged."
-  ].join("\n");
+    "6. If a fragment is already in the target language, keep it unchanged.",
+  ];
+
+  if (translationRules.length > 0) {
+    prompt.push(
+      "",
+      `Additional rules specifically for ${targetLanguage} (these rules are mandatory):`,
+      ...translationRules.map((rule, index) => `${index + 1}. ${rule}`),
+    );
+  }
+
+  return prompt.join("\n");
 }
 
 async function translateText(
@@ -531,6 +551,7 @@ async function translateText(
   model: string,
   sourceLanguage: string,
   targetLanguage: string,
+  translationRules: string[],
   text: string,
 ): Promise<TranslationResponse> {
   
@@ -539,7 +560,7 @@ async function translateText(
     input: [
       {
         role: "system",
-        content: makeTranslatorPrompt(sourceLanguage, targetLanguage),
+        content: makeTranslatorPrompt(sourceLanguage, targetLanguage, translationRules),
       },
       {
         role: "user",
@@ -565,6 +586,7 @@ async function translateWithRetry(
   model: string,
   sourceLanguage: string,
   targetLanguage: string,
+  translationRules: string[],
   text: string,
 ): Promise<TranslationResponse> {
   const maxAttempts = 3;
@@ -572,7 +594,14 @@ async function translateWithRetry(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await translateText(client, model, sourceLanguage, targetLanguage, text);
+      return await translateText(
+        client,
+        model,
+        sourceLanguage,
+        targetLanguage,
+        translationRules,
+        text,
+      );
     } catch (error) {
       lastError = error;
       if (attempt < maxAttempts) {
@@ -590,6 +619,7 @@ async function translateUniqueTexts(
   model: string,
   sourceLanguage: string,
   targetLanguage: string,
+  translationRules: string[],
   uniqueTexts: string[],
   concurrency: number,
 ): Promise<TranslationBatchResult> {
@@ -619,6 +649,7 @@ async function translateUniqueTexts(
         model,
         sourceLanguage,
         targetLanguage,
+        translationRules,
         sourceText,
       );
       results.set(sourceText, translated.text);
@@ -717,6 +748,7 @@ async function main(): Promise<void> {
   if (!targetLanguage) {
     throw new Error("Target language cannot be empty");
   }
+  const translationRules = await loadTranslationRules(options.rulesFile, targetLanguage);
 
   const postTypes = extractPostTypes(xml);
   const fileContext: FileContext = {
@@ -754,6 +786,7 @@ async function main(): Promise<void> {
     options.model,
     sourceLanguage,
     targetLanguage,
+    translationRules,
     uniqueTexts,
     options.concurrency,
   );
@@ -788,6 +821,7 @@ async function main(): Promise<void> {
   console.log(`Model:  ${options.model}`);
   console.log(`Units:  ${units.length} (${uniqueTexts.length} unique translated segments)`);
   console.log(`Langs:  ${sourceLanguage} -> ${targetLanguage}`);
+  console.log(`Language-specific rules: ${translationRules.length}`);
   console.log(`Translation time: ${formatDuration(translationDurationMs)}`);
   if (options.preservePageArticleHandle && fileContext.isPageOrArticle) {
     const postTypeLabel = fileContext.postTypes.length > 0 ? fileContext.postTypes.join(", ") : "unknown";

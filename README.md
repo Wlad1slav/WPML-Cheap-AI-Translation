@@ -7,6 +7,7 @@
 3. Writes a separate import-ready XLIFF file for WPML into `wpml-import`
 4. Shows token usage and estimated translation cost in USD
 5. Appends translation time, token usage, and estimated cost to a persistent history log
+6. Applies additional translation rules configured per target language
 
 ## Setup
 
@@ -54,6 +55,7 @@ Optional flags:
 
 - `--posts-dir posts`
 - `--out-dir wpml-import`
+- `--rules-file translation-rules.json`
 - `--target-language de` (alias: `--to de`)
 - `--model gpt-4.1-nano`
 - `--concurrency 3`
@@ -86,6 +88,7 @@ Useful options:
 
 - `--posts-dir posts`
 - `--out-dir wpml-import`
+- `--rules-file translation-rules.json`
 - `--target-language de` (alias: `--to de`)
 - `--model gpt-4.1-nano`
 - `--concurrency 3`
@@ -97,6 +100,28 @@ Useful options:
 - `--continue-on-error`
 
 This command runs `translate:wpml` for each file sequentially and prints a batch summary.
+
+## Language-specific Translation Rules
+
+Additional terminology and brand rules are stored in `translation-rules.json`. Each
+key is a target-language code and each value is an array of instructions:
+
+```json
+{
+  "ru": [
+    "«ФОП» завжди перекладай як «ФЛП».",
+    "monobank не перекладай і зберігай написання латиницею."
+  ],
+  "de": [
+    "Example rule for German."
+  ]
+}
+```
+
+The rules for the current target language are automatically added to every
+translation request. A regional language such as `ru-RU` receives both `ru` and
+`ru-RU` rules, when present. Use `--rules-file path/to/rules.json` to select a
+different configuration file.
 
 ## Handle Preservation Caveat
 

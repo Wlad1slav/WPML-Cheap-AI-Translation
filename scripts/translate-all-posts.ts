@@ -7,6 +7,7 @@ import { formatDuration, isLikelyModelId } from "./lib/utils.js";
 type CliOptions = {
   postsDir: string;
   outDir: string;
+  rulesFile: string;
   targetLanguage: string | null;
   model: string | null;
   concurrency: number | null;
@@ -32,6 +33,7 @@ Usage:
 Options:
   --posts-dir <path>        Source directory with XLIFF files (default: posts)
   --out-dir <path>          Output directory for import-ready files (default: wpml-import)
+  --rules-file <path>       JSON rules grouped by target language (default: translation-rules.json)
   --target-language <lc>    Target language override for every file (example: en, de, fr)
   --to <lc>                 Alias for --target-language
   --model <model>           OpenAI model for each file translation
@@ -56,6 +58,7 @@ function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     postsDir: "posts",
     outDir: "wpml-import",
+    rulesFile: "translation-rules.json",
     targetLanguage: null,
     model: null,
     concurrency: null,
@@ -120,6 +123,9 @@ function parseCliArgs(argv: string[]): CliOptions {
         break;
       case "--out-dir":
         options.outDir = readValue("--out-dir");
+        break;
+      case "--rules-file":
+        options.rulesFile = readValue("--rules-file");
         break;
       case "--target-language":
       case "--to":
@@ -225,6 +231,8 @@ function buildTranslateArgs(
     options.postsDir,
     "--out-dir",
     options.outDir,
+    "--rules-file",
+    options.rulesFile,
   ];
 
   if (options.targetLanguage) {

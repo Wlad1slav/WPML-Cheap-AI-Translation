@@ -1,6 +1,7 @@
 export type CliOptions = {
   postsDir: string;
   outDir: string;
+  rulesFile: string;
   file: string | null;
   targetLanguage: string | null;
   priceInputPer1M: number | null;
